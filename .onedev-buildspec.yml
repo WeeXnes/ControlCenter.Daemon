@@ -1,0 +1,65 @@
+version: 43
+jobs:
+- name: Build & Publish Standalone Daemon
+  steps:
+  - type: CheckoutStep
+    name: checkout code
+    cloneCredential:
+      type: DefaultCredential
+    withLfs: false
+    withSubmodules: false
+    condition: SUCCESSFUL
+    optional: false
+  - type: CommandStep
+    name: Dotnet Publish (Linux x64 Standalone)
+    runInContainer: false
+    interpreter:
+      type: DefaultInterpreter
+      commands: |
+        echo "Publishing ControlCenter.Daemon as standalone self-contained binary for Linux x64..."
+        mkdir -p ./release
+        dotnet publish ControlCenter.Daemon.csproj \
+                    -c Release \
+                    -r linux-x64 \
+                    --self-contained true \
+                    -p:PublishSingleFile=true \
+                    -p:EnableCompressionInSingleFile=true \
+                    -o ./output_linux
+        (cd ./output_linux && tar -czvf ../release/ControlCenter.Daemon_Linux_x64.tar.gz .)
+    useTTY: true
+    condition: SUCCESSFUL
+    optional: false
+  - type: CommandStep
+    name: Dotnet Publish (Windows x64 Standalone)
+    runInContainer: false
+    interpreter:
+      type: DefaultInterpreter
+      commands: |
+        echo "Publishing ControlCenter.Daemon as standalone self-contained binary for Windows x64..."
+        dotnet publish ControlCenter.Daemon.csproj \
+                    -c Release \
+                    -r win-x64 \
+                    --self-contained true \
+                    -p:PublishSingleFile=true \
+                    -p:EnableCompressionInSingleFile=true \
+                    -o ./output_win
+        (cd ./output_win && zip -r ../release/ControlCenter.Daemon_Windows_x64.zip .)
+        rm -rf ./output_linux ./output_win
+    useTTY: true
+    condition: SUCCESSFUL
+    optional: false
+  - type: PublishArtifactStep
+    name: Upload Artifacts
+    sourcePath: release
+    artifacts: '**'
+    condition: ALWAYS
+    optional: false
+  jobExecutor: Builder
+  triggers:
+  - type: BranchUpdateTrigger
+    userMatch: anyone
+  - type: PullRequestUpdateTrigger
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
