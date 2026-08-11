@@ -13,7 +13,11 @@ namespace ControlCenter.Daemon.Services
         {
             string execPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
             string workingDir = AppContext.BaseDirectory;
-            string currentUser = Environment.UserName;
+            string currentUser = Environment.GetEnvironmentVariable("SUDO_USER");
+            if (string.IsNullOrEmpty(currentUser))
+            {
+                currentUser = Environment.UserName;
+            }
 
             if (string.IsNullOrEmpty(execPath))
             {
