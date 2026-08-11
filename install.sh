@@ -41,6 +41,9 @@ cd "$INSTALL_DIR"
 # Make executable in case it lost permissions
 chmod +x ControlCenter.Daemon
 
+echo "[+] Adding to system PATH (/usr/local/bin/controlcenter-daemon)..."
+ln -sf "$INSTALL_DIR/ControlCenter.Daemon" /usr/local/bin/controlcenter-daemon
+
 if [ -z "$API_TOKEN" ]; then
     echo "[+] Configuring without API key..."
     SUDO_USER="$SUDO_USER" ./ControlCenter.Daemon --install-service

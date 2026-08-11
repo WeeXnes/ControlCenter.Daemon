@@ -18,8 +18,8 @@ If you prefer to run it manually without installing a background service:
 
 ```bash
 # Set an API token in your user configuration
-./ControlCenter.Daemon setToken "your_secret_key"
+controlcenter-daemon setToken "your_secret_key"
 
-# Run it on a custom port
-./ControlCenter.Daemon --port 8080 --key "your_secret_key"
+# Run it manually on a custom port
+controlcenter-daemon --port 8080 --key "your_secret_key"
 ```
