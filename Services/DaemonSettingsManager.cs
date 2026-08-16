@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -7,11 +8,17 @@ namespace ControlCenter.Daemon.Services
 {
     public class DaemonSettings
     {
+        [JsonPropertyName("serverUrl")]
+        public string ServerUrl { get; set; } = "";
+
+        [JsonPropertyName("machineId")]
+        public string MachineId { get; set; } = "";
+
         [JsonPropertyName("apiKey")]
         public string ApiKey { get; set; } = "";
 
-        [JsonPropertyName("port")]
-        public int Port { get; set; } = 9100;
+        [JsonPropertyName("certFingerprint")]
+        public string CertFingerprint { get; set; } = "";
     }
 
     public static class DaemonSettingsManager
@@ -19,6 +26,10 @@ namespace ControlCenter.Daemon.Services
         public static string GetSettingsPath()
         {
             string userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(userDir))
+            {
+                userDir = "/root";
+            }
             return Path.Combine(userDir, ".ControlCenterDaemon", "settings.json");
         }
 
@@ -49,11 +60,36 @@ namespace ControlCenter.Daemon.Services
             if (!Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    try { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch { }
+                }
             }
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             string json = JsonSerializer.Serialize(settings, options);
             File.WriteAllText(path, json);
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+            }
+        }
+
+        public static void SetServer(string serverUrl)
+        {
+            var settings = Load();
+            settings.ServerUrl = serverUrl.Trim();
+            Save(settings);
+            Console.WriteLine($"[+] Server URL saved: {settings.ServerUrl}");
+        }
+
+        public static void SetMachineId(string id)
+        {
+            var settings = Load();
+            settings.MachineId = id.Trim();
+            Save(settings);
+            Console.WriteLine($"[+] Machine ID saved: {settings.MachineId}");
         }
 
         public static void SetToken(string token)
@@ -61,7 +97,16 @@ namespace ControlCenter.Daemon.Services
             var settings = Load();
             settings.ApiKey = token.Trim();
             Save(settings);
-            Console.WriteLine($"[+] API token successfully saved to {GetSettingsPath()}");
+            Console.WriteLine($"[+] API token saved.");
+        }
+
+        public static void SetCertFingerprint(string fingerprint)
+        {
+            var settings = Load();
+            settings.CertFingerprint = fingerprint.Replace(":", "").Trim().ToUpperInvariant();
+            Save(settings);
+            Console.WriteLine($"[+] SSL Certificate Pin SHA-256 saved: {settings.CertFingerprint}");
         }
     }
 }
+

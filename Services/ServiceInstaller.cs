@@ -9,11 +9,11 @@ namespace ControlCenter.Daemon.Services
     {
         private const string ServiceName = "controlcenter-daemon";
 
-        public static void Install(int port, string? apiKey)
+        public static void Install(string? serverUrl, string? machineId, string? apiKey, string? certFingerprint)
         {
             string execPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
             string workingDir = AppContext.BaseDirectory;
-            string currentUser = Environment.GetEnvironmentVariable("SUDO_USER");
+            string? currentUser = Environment.GetEnvironmentVariable("SUDO_USER");
             if (string.IsNullOrEmpty(currentUser))
             {
                 currentUser = Environment.UserName;
@@ -25,17 +25,27 @@ namespace ControlCenter.Daemon.Services
                 return;
             }
 
-            Console.WriteLine($"Installing {ServiceName} service...");
+            // Save settings securely to user settings.json
+            var settings = DaemonSettingsManager.Load();
+            if (!string.IsNullOrWhiteSpace(serverUrl)) settings.ServerUrl = serverUrl.Trim();
+            if (!string.IsNullOrWhiteSpace(machineId)) settings.MachineId = machineId.Trim();
+            if (!string.IsNullOrWhiteSpace(apiKey)) settings.ApiKey = apiKey.Trim();
+            if (!string.IsNullOrWhiteSpace(certFingerprint)) settings.CertFingerprint = certFingerprint.Replace(":", "").Trim().ToUpperInvariant();
+            DaemonSettingsManager.Save(settings);
+
+            Console.WriteLine($"Installing {ServiceName} service (Zero-Trust Reverse WebSocket)...");
             Console.WriteLine($"  Executable Path:   {execPath}");
             Console.WriteLine($"  Working Directory: {workingDir}");
             Console.WriteLine($"  Execution User:    {currentUser}");
-            Console.WriteLine($"  Port:               {port}");
-            Console.WriteLine($"  API Key Configured: {(!string.IsNullOrEmpty(apiKey) ? "Yes" : "No")}");
+            Console.WriteLine($"  Server URL:        {settings.ServerUrl}");
+            Console.WriteLine($"  Machine ID:        {settings.MachineId}");
+            Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(settings.ApiKey) ? "Yes" : "No")}");
+            Console.WriteLine($"  SSL Pinning:       {(!string.IsNullOrEmpty(settings.CertFingerprint) ? settings.CertFingerprint : "TOFU / Automatic")}");
             Console.WriteLine();
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                InstallLinuxSystemd(execPath, workingDir, currentUser, port, apiKey);
+                InstallLinuxSystemd(execPath, workingDir, currentUser);
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -65,14 +75,15 @@ namespace ControlCenter.Daemon.Services
             }
         }
 
-        private static void InstallLinuxSystemd(string execPath, string workingDir, string user, int port, string? apiKey)
+        private static void InstallLinuxSystemd(string execPath, string workingDir, string user)
         {
             string unitFilePath = $"/etc/systemd/system/{ServiceName}.service";
 
-            string unitContent = $@"# ControlCenter Daemon Service Unit
+            string unitContent = $@"# ControlCenter Daemon Service Unit (Zero-Trust Reverse Client)
 [Unit]
-Description=ControlCenter Telemetry Daemon Service
-After=network.target
+Description=ControlCenter Telemetry & Control Daemon Service
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -81,8 +92,6 @@ WorkingDirectory={workingDir}
 ExecStart={execPath}
 Restart=always
 RestartSec=5
-Environment=""CONTROL_CENTER_PORT={port}""
-Environment=""CONTROL_CENTER_API_KEY={apiKey ?? ""}""
 
 [Install]
 WantedBy=multi-user.target
@@ -179,3 +188,4 @@ WantedBy=multi-user.target
         }
     }
 }
+
