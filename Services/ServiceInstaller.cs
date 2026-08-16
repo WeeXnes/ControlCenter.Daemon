@@ -25,11 +25,9 @@ namespace ControlCenter.Daemon.Services
                 return;
             }
 
-            // Save settings securely to user settings.json
+            // Auto-generate ID and key credentials if not provided, and save settings securely
+            var (resServer, resId, resKey) = DaemonSettingsManager.EnsureCredentials(serverUrl, machineId, apiKey);
             var settings = DaemonSettingsManager.Load();
-            if (!string.IsNullOrWhiteSpace(serverUrl)) settings.ServerUrl = serverUrl.Trim();
-            if (!string.IsNullOrWhiteSpace(machineId)) settings.MachineId = machineId.Trim();
-            if (!string.IsNullOrWhiteSpace(apiKey)) settings.ApiKey = apiKey.Trim();
             if (!string.IsNullOrWhiteSpace(certFingerprint)) settings.CertFingerprint = certFingerprint.Replace(":", "").Trim().ToUpperInvariant();
             DaemonSettingsManager.Save(settings);
 
@@ -39,7 +37,7 @@ namespace ControlCenter.Daemon.Services
             Console.WriteLine($"  Execution User:    {currentUser}");
             Console.WriteLine($"  Server URL:        {settings.ServerUrl}");
             Console.WriteLine($"  Machine ID:        {settings.MachineId}");
-            Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(settings.ApiKey) ? "Yes" : "No")}");
+            Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(settings.ApiKey) ? "Yes (Auto-Generated)" : "No")}");
             Console.WriteLine($"  SSL Pinning:       {(!string.IsNullOrEmpty(settings.CertFingerprint) ? settings.CertFingerprint : "TOFU / Automatic")}");
             Console.WriteLine();
 

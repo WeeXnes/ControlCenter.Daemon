@@ -11,17 +11,53 @@ using System.Threading;
 using System.Threading.Tasks;
 using ControlCenter.Daemon.Services;
 
-// Check command line arguments for management and setup commands
+// Parse command line arguments
+string? cliServer = null;
+string? cliId = null;
+string? cliKey = null;
+string? cliPin = null;
+
+for (int i = 0; i < args.Length; i++)
+{
+    string arg = args[i];
+    string next = i + 1 < args.Length ? args[i + 1] : "";
+
+    if ((arg == "--address" || arg == "-a" || arg == "--server" || arg == "-s") && !string.IsNullOrEmpty(next))
+    {
+        cliServer = next;
+        i++;
+    }
+    else if ((arg == "--id" || arg == "--machine-id") && !string.IsNullOrEmpty(next))
+    {
+        cliId = next;
+        i++;
+    }
+    else if ((arg == "--key" || arg == "-k" || arg == "--token" || arg == "-t") && !string.IsNullOrEmpty(next))
+    {
+        cliKey = next;
+        i++;
+    }
+    else if ((arg == "--pin" || arg == "--cert-fingerprint") && !string.IsNullOrEmpty(next))
+    {
+        cliPin = next;
+        i++;
+    }
+    else if (i == 0 && (arg.StartsWith("http://") || arg.StartsWith("https://") || arg.StartsWith("ws://") || arg.StartsWith("wss://") || (arg.Contains(":") && !arg.StartsWith("-"))))
+    {
+        cliServer = arg;
+    }
+}
+
+// Check for explicit helper subcommands
 if (args.Length > 0)
 {
     string firstArg = args[0].ToLowerInvariant();
 
-    if (firstArg == "set-server" || firstArg == "setserver" || firstArg == "-s")
+    if (firstArg == "set-server" || firstArg == "setserver")
     {
         if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
         {
             Console.WriteLine("Error: Please provide a server URL.");
-            Console.WriteLine("Usage: controlcenter-daemon set-server wss://controlcenter.vpn/ws/daemon");
             return;
         }
         DaemonSettingsManager.SetServer(args[1]);
@@ -32,18 +68,16 @@ if (args.Length > 0)
         if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
         {
             Console.WriteLine("Error: Please provide a machine ID.");
-            Console.WriteLine("Usage: controlcenter-daemon set-id <uuid>");
             return;
         }
         DaemonSettingsManager.SetMachineId(args[1]);
         return;
     }
-    else if (firstArg == "set-token" || firstArg == "settoken" || firstArg == "-t")
+    else if (firstArg == "set-token" || firstArg == "settoken")
     {
         if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
         {
             Console.WriteLine("Error: Please provide an API token.");
-            Console.WriteLine("Usage: controlcenter-daemon set-token <token>");
             return;
         }
         DaemonSettingsManager.SetToken(args[1]);
@@ -54,7 +88,6 @@ if (args.Length > 0)
         if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
         {
             Console.WriteLine("Error: Please provide an SSL SHA-256 certificate fingerprint.");
-            Console.WriteLine("Usage: controlcenter-daemon set-pin <sha256_hash>");
             return;
         }
         DaemonSettingsManager.SetCertFingerprint(args[1]);
@@ -62,33 +95,7 @@ if (args.Length > 0)
     }
     else if (firstArg == "--install-service" || firstArg == "-i" || firstArg == "install-service" || firstArg == "install")
     {
-        var saved = DaemonSettingsManager.Load();
-        string? instServer = Environment.GetEnvironmentVariable("CONTROL_CENTER_SERVER") ?? saved.ServerUrl;
-        string? instId = Environment.GetEnvironmentVariable("CONTROL_CENTER_MACHINE_ID") ?? saved.MachineId;
-        string? instKey = Environment.GetEnvironmentVariable("CONTROL_CENTER_API_KEY") ?? saved.ApiKey;
-        string? instPin = Environment.GetEnvironmentVariable("CONTROL_CENTER_CERT_PIN") ?? saved.CertFingerprint;
-
-        for (int i = 1; i < args.Length; i++)
-        {
-            if ((args[i] == "--server" || args[i] == "-s") && i + 1 < args.Length)
-            {
-                instServer = args[i + 1];
-            }
-            if ((args[i] == "--id" || args[i] == "--machine-id") && i + 1 < args.Length)
-            {
-                instId = args[i + 1];
-            }
-            if ((args[i] == "--key" || args[i] == "-k" || args[i] == "--token") && i + 1 < args.Length)
-            {
-                instKey = args[i + 1];
-            }
-            if ((args[i] == "--pin" || args[i] == "--cert-fingerprint") && i + 1 < args.Length)
-            {
-                instPin = args[i + 1];
-            }
-        }
-
-        ServiceInstaller.Install(instServer, instId, instKey, instPin);
+        ServiceInstaller.Install(cliServer, cliId, cliKey, cliPin);
         return;
     }
     else if (firstArg == "--uninstall-service" || firstArg == "-u" || firstArg == "uninstall-service" || firstArg == "uninstall")
@@ -102,84 +109,54 @@ if (args.Length > 0)
         Console.WriteLine("  ControlCenter Daemon (Zero-Trust Reverse Client)");
         Console.WriteLine("==================================================");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  controlcenter-daemon [options]");
+        Console.WriteLine("  controlcenter-daemon --address <server_address>");
         Console.WriteLine();
-        Console.WriteLine("Commands:");
-        Console.WriteLine("  --install-service [opts]  Install and start as background system service");
-        Console.WriteLine("  --uninstall-service       Uninstall background service");
-        Console.WriteLine("  set-server <url>          Set ControlCenter server WebSocket URL");
-        Console.WriteLine("  set-id <uuid>             Set Machine ID");
-        Console.WriteLine("  set-token <token>         Set authentication token");
-        Console.WriteLine("  set-pin <sha256>          Set pinned SSL certificate fingerprint");
+        Console.WriteLine("Examples:");
+        Console.WriteLine("  controlcenter-daemon --address 192.168.178.95:3000");
+        Console.WriteLine("  sudo controlcenter-daemon --install-service --address 192.168.178.95:3000");
         Console.WriteLine();
-        Console.WriteLine("Options for --install-service or standalone run:");
-        Console.WriteLine("  -s, --server <url>        Server URL (e.g. wss://controlcenter.vpn/ws/daemon)");
-        Console.WriteLine("      --id <machine_id>     Machine ID (UUID)");
-        Console.WriteLine("  -k, --key, --token <key>  Authentication token");
-        Console.WriteLine("      --pin <sha256>        Server SSL Certificate SHA-256 fingerprint");
-        Console.WriteLine("  -h, --help                Show command line help");
+        Console.WriteLine("Options:");
+        Console.WriteLine("  -a, -s, --address, --server <addr>  ControlCenter server address");
+        Console.WriteLine("  -i, --install-service               Install and run as background system service");
+        Console.WriteLine("  -u, --uninstall-service             Uninstall background service");
+        Console.WriteLine("      --id <machine_id>               Custom Machine ID (optional, auto-generated)");
+        Console.WriteLine("  -k, --key, --token <key>            Custom Auth token (optional, auto-generated)");
+        Console.WriteLine("      --pin <sha256>                  Pinned SSL Certificate Fingerprint (optional)");
         Console.WriteLine();
         return;
     }
 }
 
-// Load saved settings
-var daemonSettings = DaemonSettingsManager.Load();
+// Automatically resolve server and ensure persistent credentials
+var (serverUrl, machineId, apiKey) = DaemonSettingsManager.EnsureCredentials(
+    cliServer ?? Environment.GetEnvironmentVariable("CONTROL_CENTER_SERVER"),
+    cliId ?? Environment.GetEnvironmentVariable("CONTROL_CENTER_MACHINE_ID"),
+    cliKey ?? Environment.GetEnvironmentVariable("CONTROL_CENTER_API_KEY")
+);
 
-// Resolve active configuration (CLI args -> Env Vars -> Settings.json)
-string serverUrl = Environment.GetEnvironmentVariable("CONTROL_CENTER_SERVER") ?? daemonSettings.ServerUrl;
-string machineId = Environment.GetEnvironmentVariable("CONTROL_CENTER_MACHINE_ID") ?? daemonSettings.MachineId;
-string apiKey = Environment.GetEnvironmentVariable("CONTROL_CENTER_API_KEY") ?? daemonSettings.ApiKey;
-string certPin = Environment.GetEnvironmentVariable("CONTROL_CENTER_CERT_PIN") ?? daemonSettings.CertFingerprint;
-
-for (int i = 0; i < args.Length; i++)
-{
-    if ((args[i] == "--server" || args[i] == "-s") && i + 1 < args.Length) serverUrl = args[i + 1];
-    if ((args[i] == "--id" || args[i] == "--machine-id") && i + 1 < args.Length) machineId = args[i + 1];
-    if ((args[i] == "--key" || args[i] == "-k" || args[i] == "--token") && i + 1 < args.Length) apiKey = args[i + 1];
-    if ((args[i] == "--pin" || args[i] == "--cert-fingerprint") && i + 1 < args.Length) certPin = args[i + 1];
-}
-
-// Ensure certificate pin is formatted cleanly
-certPin = certPin.Replace(":", "").Trim().ToUpperInvariant();
+string certPin = (cliPin ?? Environment.GetEnvironmentVariable("CONTROL_CENTER_CERT_PIN") ?? DaemonSettingsManager.Load().CertFingerprint)
+    .Replace(":", "").Trim().ToUpperInvariant();
 
 Console.WriteLine("==================================================");
-Console.WriteLine("  ControlCenter Daemon v2.0 (Zero-Trust Client)");
+Console.WriteLine("  ControlCenter Daemon (Zero-Trust Client)");
 Console.WriteLine("==================================================");
 
-if (string.IsNullOrWhiteSpace(serverUrl) || string.IsNullOrWhiteSpace(machineId))
+if (string.IsNullOrWhiteSpace(serverUrl))
 {
     Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine("[!] Daemon configuration incomplete.");
-    Console.WriteLine("    Please configure the server URL and Machine ID:");
-    Console.WriteLine("    controlcenter-daemon set-server wss://<your-controlcenter-url>/ws/daemon");
-    Console.WriteLine("    controlcenter-daemon set-id <your-machine-id>");
-    Console.WriteLine("    controlcenter-daemon set-token <your-token>");
+    Console.WriteLine("[!] No ControlCenter server address configured.");
+    Console.WriteLine();
+    Console.WriteLine("Quick Start:");
+    Console.WriteLine("  controlcenter-daemon --address <ip_or_domain:port>");
+    Console.WriteLine();
+    Console.WriteLine("Example:");
+    Console.WriteLine("  controlcenter-daemon --address 192.168.178.95:3000");
+    Console.WriteLine();
+    Console.WriteLine("Install as a permanent background service:");
+    Console.WriteLine("  sudo controlcenter-daemon --install-service --address 192.168.178.95:3000");
     Console.ResetColor();
-    Console.WriteLine();
-    Console.WriteLine("Or install the background service in one command:");
-    Console.WriteLine("    sudo controlcenter-daemon --install-service --server wss://... --id ... --key ...");
-    Console.WriteLine();
+    Console.WriteLine("==================================================");
     return;
-}
-
-// Normalize WebSocket URL
-if (serverUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-{
-    serverUrl = "wss://" + serverUrl.Substring(8);
-}
-else if (serverUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-{
-    serverUrl = "ws://" + serverUrl.Substring(7);
-}
-else if (!serverUrl.StartsWith("wss://", StringComparison.OrdinalIgnoreCase) && !serverUrl.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
-{
-    serverUrl = "wss://" + serverUrl;
-}
-
-if (!serverUrl.Contains("/ws/daemon") && !serverUrl.Contains("/ws/"))
-{
-    serverUrl = serverUrl.TrimEnd('/') + "/ws/daemon";
 }
 
 // Construct target URI with authentication parameters
@@ -193,8 +170,9 @@ uriBuilder.Query = queryParam;
 Uri targetUri = uriBuilder.Uri;
 
 Console.WriteLine($"  Target Server:     {serverUrl}");
+Console.WriteLine($"  Node Hostname:     {Environment.MachineName}");
 Console.WriteLine($"  Machine ID:        {machineId}");
-Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(apiKey) ? "Yes" : "No")}");
+Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(apiKey) ? "Yes (Auto-Generated)" : "No")}");
 Console.WriteLine($"  Certificate Pin:   {(!string.IsNullOrEmpty(certPin) ? certPin : "Auto-Pin (TOFU)")}");
 Console.WriteLine("==================================================");
 
@@ -333,7 +311,25 @@ static async Task ReceiveCommandsLoopAsync(ClientWebSocket ws, CancellationToken
             {
                 string type = typeElem.GetString() ?? "";
 
-                if (type == "action")
+                if (type == "setup_ssh")
+                {
+                    string publicKey = root.TryGetProperty("publicKey", out var pk) ? pk.GetString() ?? "" : "";
+                    string keyName = root.TryGetProperty("keyName", out var kn) ? kn.GetString() ?? "" : "default";
+
+                    if (!string.IsNullOrWhiteSpace(publicKey))
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] Received SSH public key '{keyName}' from ControlCenter server.");
+                        ProvisionSshPublicKey(ws, publicKey, ct);
+                    }
+                }
+                else if (type == "ssh_setup_error")
+                {
+                    string errMsg = root.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "";
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [!] SSH SETUP NOTICE: {errMsg}");
+                    Console.ResetColor();
+                }
+                else if (type == "action")
                 {
                     string action = root.TryGetProperty("action", out var a) ? a.GetString() ?? "" : "";
                     string actionId = root.TryGetProperty("actionId", out var aid) ? aid.GetString() ?? "" : "";
@@ -353,6 +349,180 @@ static async Task ReceiveCommandsLoopAsync(ClientWebSocket ws, CancellationToken
             break;
         }
     }
+}
+
+static void EnsureSshdConfig()
+{
+    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return;
+
+    try
+    {
+        bool needsReload = false;
+        string sshdDropInDir = "/etc/ssh/sshd_config.d";
+
+        if (Directory.Exists(sshdDropInDir))
+        {
+            string dropInFile = Path.Combine(sshdDropInDir, "99-controlcenter.conf");
+            string requiredConfig = "PubkeyAuthentication yes\nAuthorizedKeysFile .ssh/authorized_keys\n";
+            if (!File.Exists(dropInFile) || File.ReadAllText(dropInFile).Trim() != requiredConfig.Trim())
+            {
+                File.WriteAllText(dropInFile, requiredConfig);
+                try { File.SetUnixFileMode(dropInFile, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [+] Enabled PubkeyAuthentication in {dropInFile}");
+                Console.ResetColor();
+                needsReload = true;
+            }
+        }
+        else if (File.Exists("/etc/ssh/sshd_config"))
+        {
+            string content = File.ReadAllText("/etc/ssh/sshd_config");
+            if (content.Contains("PubkeyAuthentication no"))
+            {
+                content = content.Replace("PubkeyAuthentication no", "PubkeyAuthentication yes");
+                File.WriteAllText("/etc/ssh/sshd_config", content);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [+] Updated /etc/ssh/sshd_config with PubkeyAuthentication yes");
+                Console.ResetColor();
+                needsReload = true;
+            }
+        }
+
+        try
+        {
+            if (needsReload)
+            {
+                RunSystemCommand("sh", "-c \"systemctl reload sshd || systemctl reload ssh || systemctl restart sshd || systemctl restart ssh\"");
+            }
+            else
+            {
+                RunSystemCommand("sh", "-c \"systemctl is-active --quiet sshd || systemctl is-active --quiet ssh || systemctl enable --now sshd || systemctl enable --now ssh\"");
+            }
+        }
+        catch { }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [i] Note on SSH config check: {ex.Message}");
+    }
+}
+
+static void RunSystemCommand(string fileName, string args)
+{
+    try
+    {
+        using var proc = Process.Start(new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = args,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        proc?.WaitForExit(3000);
+    }
+    catch { }
+}
+
+static void ProvisionSshPublicKey(ClientWebSocket ws, string publicKey, CancellationToken ct)
+{
+    bool success = false;
+    EnsureSshdConfig();
+
+    string targetUser = SystemCollector.GetActiveUsername();
+    string cleanKey = publicKey.Trim();
+
+    try
+    {
+        var targetSshDirs = new List<(string dir, string user)>();
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            if (targetUser != "root" && Directory.Exists($"/home/{targetUser}"))
+            {
+                targetSshDirs.Add(($"/home/{targetUser}/.ssh", targetUser));
+            }
+            else
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (!string.IsNullOrEmpty(home) && Directory.Exists(home))
+                {
+                    targetSshDirs.Add((Path.Combine(home, ".ssh"), targetUser));
+                }
+            }
+
+            // Also ensure root has it if running as root
+            if (Environment.UserName == "root" && targetUser != "root")
+            {
+                targetSshDirs.Add(("/root/.ssh", "root"));
+            }
+        }
+        else
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            targetSshDirs.Add((Path.Combine(home, ".ssh"), targetUser));
+        }
+
+        foreach (var (sshDir, user) in targetSshDirs)
+        {
+            if (!Directory.Exists(sshDir))
+            {
+                Directory.CreateDirectory(sshDir);
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    try { File.SetUnixFileMode(sshDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch { }
+                }
+            }
+
+            string authKeysFile = Path.Combine(sshDir, "authorized_keys");
+            string existing = File.Exists(authKeysFile) ? File.ReadAllText(authKeysFile) : "";
+
+            if (!existing.Contains(cleanKey))
+            {
+                File.AppendAllText(authKeysFile, cleanKey + Environment.NewLine);
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    try { File.SetUnixFileMode(authKeysFile, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+                }
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [+] Successfully authorized ControlCenter SSH public key into {authKeysFile} (User: {user})");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [i] ControlCenter SSH key is already authorized in {authKeysFile} (User: {user})");
+            }
+
+            // Fix file ownership if running as root for a non-root user directory
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && Environment.UserName == "root" && user != "root")
+            {
+                RunSystemCommand("chown", $"-R {user}:{user} \"{sshDir}\"");
+            }
+        }
+
+        success = true;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [-] Failed to install SSH authorized_keys: {ex.Message}");
+        Console.ResetColor();
+    }
+
+    try
+    {
+        var response = new
+        {
+            type = "ssh_provisioned",
+            success,
+            user = targetUser
+        };
+        string json = JsonSerializer.Serialize(response, DaemonSerializer.Options);
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+    catch { }
 }
 
 static void ExecuteRemoteAction(ClientWebSocket ws, string action, string actionId, CancellationToken ct)

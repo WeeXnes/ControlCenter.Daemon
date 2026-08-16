@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -76,10 +77,82 @@ namespace ControlCenter.Daemon.Services
             }
         }
 
+        public static string NormalizeServerUrl(string rawUrl)
+        {
+            if (string.IsNullOrWhiteSpace(rawUrl)) return "";
+            string url = rawUrl.Trim();
+
+            // If starts with http:// -> change to ws://
+            if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "ws://" + url.Substring(7);
+            }
+            // If starts with https:// -> change to wss://
+            else if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "wss://" + url.Substring(8);
+            }
+            // If doesn't start with ws:// or wss://, default to wss://
+            else if (!url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+            {
+                url = "wss://" + url;
+            }
+
+            // Ensure path ends with /ws/daemon if not already present
+            if (!url.EndsWith("/ws/daemon", StringComparison.OrdinalIgnoreCase))
+            {
+                url = url.TrimEnd('/') + "/ws/daemon";
+            }
+
+            return url;
+        }
+
+        public static (string serverUrl, string machineId, string apiKey) EnsureCredentials(string? serverUrl, string? machineId, string? apiKey)
+        {
+            var settings = Load();
+
+            string finalServer = !string.IsNullOrWhiteSpace(serverUrl) ? NormalizeServerUrl(serverUrl) : settings.ServerUrl;
+            string finalId = !string.IsNullOrWhiteSpace(machineId) ? machineId.Trim() : settings.MachineId;
+            string finalKey = !string.IsNullOrWhiteSpace(apiKey) ? apiKey.Trim() : settings.ApiKey;
+
+            bool updated = false;
+
+            if (string.IsNullOrWhiteSpace(finalId))
+            {
+                finalId = Guid.NewGuid().ToString();
+                updated = true;
+            }
+
+            if (string.IsNullOrWhiteSpace(finalKey))
+            {
+                finalKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+                updated = true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(finalServer) && finalServer != settings.ServerUrl)
+            {
+                settings.ServerUrl = finalServer;
+                updated = true;
+            }
+
+            if (updated || settings.MachineId != finalId || settings.ApiKey != finalKey)
+            {
+                settings.MachineId = finalId;
+                settings.ApiKey = finalKey;
+                if (!string.IsNullOrWhiteSpace(finalServer))
+                {
+                    settings.ServerUrl = finalServer;
+                }
+                Save(settings);
+            }
+
+            return (finalServer, finalId, finalKey);
+        }
+
         public static void SetServer(string serverUrl)
         {
             var settings = Load();
-            settings.ServerUrl = serverUrl.Trim();
+            settings.ServerUrl = NormalizeServerUrl(serverUrl);
             Save(settings);
             Console.WriteLine($"[+] Server URL saved: {settings.ServerUrl}");
         }
@@ -109,4 +182,3 @@ namespace ControlCenter.Daemon.Services
         }
     }
 }
-

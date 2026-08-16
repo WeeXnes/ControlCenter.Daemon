@@ -13,6 +13,7 @@ namespace ControlCenter.Daemon.Services;
 public class TelemetryData
 {
     public string Hostname { get; set; } = string.Empty;
+    public string UserName { get; set; } = string.Empty;
     public string Os { get; set; } = string.Empty;
     public string CpuModel { get; set; } = string.Empty;
     public int CpuCores { get; set; }
@@ -37,6 +38,7 @@ public class SystemCollector
         var data = new TelemetryData
         {
             Hostname = Environment.MachineName,
+            UserName = GetActiveUsername(),
             Os = RuntimeInformation.OSDescription,
             CpuCores = Environment.ProcessorCount,
             CpuModel = GetCpuModelName(),
@@ -54,6 +56,50 @@ public class SystemCollector
         data.CpuUsagePercent = await GetCpuUsagePercentAsync();
 
         return data;
+    }
+
+    public static string GetActiveUsername()
+    {
+        // 1. If executed under sudo, SUDO_USER contains the actual human user
+        string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+        if (!string.IsNullOrWhiteSpace(sudoUser) && sudoUser != "root")
+        {
+            return sudoUser.Trim();
+        }
+
+        // 2. Check LOGNAME or USER environment variables
+        string? logname = Environment.GetEnvironmentVariable("LOGNAME") ?? Environment.GetEnvironmentVariable("USER");
+        if (!string.IsNullOrWhiteSpace(logname) && logname != "root")
+        {
+            return logname.Trim();
+        }
+
+        // 3. Environment.UserName
+        string user = Environment.UserName;
+        if (!string.IsNullOrWhiteSpace(user) && user != "root")
+        {
+            return user.Trim();
+        }
+
+        // 4. If running as root on Linux, check /home for active non-root desktop user
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && Directory.Exists("/home"))
+        {
+            try
+            {
+                var homeDirs = Directory.GetDirectories("/home")
+                    .Select(Path.GetFileName)
+                    .Where(n => !string.IsNullOrEmpty(n) && n != "lost+found" && !n.StartsWith("."))
+                    .ToArray();
+
+                if (homeDirs.Length == 1 && !string.IsNullOrEmpty(homeDirs[0]))
+                {
+                    return homeDirs[0]!;
+                }
+            }
+            catch { }
+        }
+
+        return !string.IsNullOrWhiteSpace(user) ? user : "root";
     }
 
     private static string GetCpuModelName()
