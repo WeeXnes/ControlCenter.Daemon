@@ -10,6 +10,16 @@ using System.Threading.Tasks;
 
 namespace ControlCenter.Daemon.Services;
 
+public class DiskStatsInfo
+{
+    public string Name { get; set; } = string.Empty;
+    public string MountPoint { get; set; } = string.Empty;
+    public long TotalBytes { get; set; }
+    public long UsedBytes { get; set; }
+    public double UsagePercent { get; set; }
+    public string DriveType { get; set; } = string.Empty;
+}
+
 public class TelemetryData
 {
     public string Hostname { get; set; } = string.Empty;
@@ -18,12 +28,15 @@ public class TelemetryData
     public string CpuModel { get; set; } = string.Empty;
     public int CpuCores { get; set; }
     public double CpuUsagePercent { get; set; }
+    public List<double> CpuCoreUsages { get; set; } = new();
     public long RamTotalBytes { get; set; }
     public long RamUsedBytes { get; set; }
+    public long RamAvailableBytes { get; set; }
     public double RamUsagePercent { get; set; }
     public long DiskTotalBytes { get; set; }
     public long DiskUsedBytes { get; set; }
     public double DiskUsagePercent { get; set; }
+    public List<DiskStatsInfo> Disks { get; set; } = new();
     public double UptimeSeconds { get; set; }
     public List<string> IpAddresses { get; set; } = new();
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
@@ -32,6 +45,7 @@ public class TelemetryData
 public class SystemCollector
 {
     private static (long idle, long total) _prevCpuStats;
+    private static readonly Dictionary<int, (long idle, long total)> _prevPerCoreCpuStats = new();
 
     public static async Task<TelemetryData> CollectAsync()
     {
@@ -53,7 +67,7 @@ public class SystemCollector
         CollectDiskStats(data);
 
         // Collect CPU Stats
-        data.CpuUsagePercent = await GetCpuUsagePercentAsync();
+        await CollectCpuStatsAsync(data);
 
         return data;
     }
@@ -176,6 +190,7 @@ public class SystemCollector
                 if (memTotal > 0)
                 {
                     data.RamTotalBytes = memTotal;
+                    data.RamAvailableBytes = memAvailable;
                     data.RamUsedBytes = Math.Max(0, memTotal - memAvailable);
                     data.RamUsagePercent = Math.Round((double)data.RamUsedBytes / memTotal * 100.0, 1);
                     return;
@@ -188,6 +203,7 @@ public class SystemCollector
         var gcInfo = GC.GetGCMemoryInfo();
         data.RamTotalBytes = gcInfo.TotalAvailableMemoryBytes;
         data.RamUsedBytes = Environment.WorkingSet;
+        data.RamAvailableBytes = Math.Max(0, data.RamTotalBytes - data.RamUsedBytes);
         if (data.RamTotalBytes > 0)
         {
             data.RamUsagePercent = Math.Round((double)data.RamUsedBytes / data.RamTotalBytes * 100.0, 1);
@@ -208,6 +224,7 @@ public class SystemCollector
     {
         long totalBytes = 0;
         long freeBytes = 0;
+        var diskList = new List<DiskStatsInfo>();
 
         try
         {
@@ -215,13 +232,29 @@ public class SystemCollector
             {
                 if (drive.IsReady && (drive.DriveType == DriveType.Fixed || drive.DriveType == DriveType.Removable))
                 {
-                    totalBytes += drive.TotalSize;
-                    freeBytes += drive.AvailableFreeSpace;
+                    long dTotal = drive.TotalSize;
+                    long dFree = drive.AvailableFreeSpace;
+                    long dUsed = Math.Max(0, dTotal - dFree);
+                    double dPercent = dTotal > 0 ? Math.Round((double)dUsed / dTotal * 100.0, 1) : 0;
+
+                    totalBytes += dTotal;
+                    freeBytes += dFree;
+
+                    diskList.Add(new DiskStatsInfo
+                    {
+                        Name = drive.Name,
+                        MountPoint = drive.RootDirectory.FullName,
+                        TotalBytes = dTotal,
+                        UsedBytes = dUsed,
+                        UsagePercent = dPercent,
+                        DriveType = drive.DriveType.ToString()
+                    });
                 }
             }
         }
         catch { }
 
+        data.Disks = diskList;
         data.DiskTotalBytes = totalBytes;
         data.DiskUsedBytes = Math.Max(0, totalBytes - freeBytes);
         if (totalBytes > 0)
@@ -230,46 +263,120 @@ public class SystemCollector
         }
     }
 
-    private static async Task<double> GetCpuUsagePercentAsync()
+    private static async Task CollectCpuStatsAsync(TelemetryData data)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/proc/stat"))
         {
             try
             {
-                var cur = ReadLinuxCpuStat();
-                if (_prevCpuStats.total > 0 && cur.total > _prevCpuStats.total)
+                var (overallStat, coreStats) = ReadLinuxCpuStats();
+                if (_prevCpuStats.total > 0 && overallStat.total > _prevCpuStats.total)
                 {
-                    long totalDiff = cur.total - _prevCpuStats.total;
-                    long idleDiff = cur.idle - _prevCpuStats.idle;
+                    long totalDiff = overallStat.total - _prevCpuStats.total;
+                    long idleDiff = overallStat.idle - _prevCpuStats.idle;
                     double usage = (1.0 - (double)idleDiff / totalDiff) * 100.0;
-                    _prevCpuStats = cur;
-                    return Math.Round(Math.Clamp(usage, 0.0, 100.0), 1);
+                    data.CpuUsagePercent = Math.Round(Math.Clamp(usage, 0.0, 100.0), 1);
+                    _prevCpuStats = overallStat;
+
+                    var coreUsages = new List<double>();
+                    for (int i = 0; i < coreStats.Count; i++)
+                    {
+                        var c = coreStats[i];
+                        if (_prevPerCoreCpuStats.TryGetValue(i, out var prevCore) && c.total > prevCore.total)
+                        {
+                            long cTotDiff = c.total - prevCore.total;
+                            long cIdleDiff = c.idle - prevCore.idle;
+                            double cUsage = (1.0 - (double)cIdleDiff / cTotDiff) * 100.0;
+                            coreUsages.Add(Math.Round(Math.Clamp(cUsage, 0.0, 100.0), 1));
+                        }
+                        else
+                        {
+                            coreUsages.Add(data.CpuUsagePercent);
+                        }
+                        _prevPerCoreCpuStats[i] = c;
+                    }
+                    data.CpuCoreUsages = coreUsages;
+                    return;
                 }
 
-                _prevCpuStats = cur;
+                _prevCpuStats = overallStat;
+                for (int i = 0; i < coreStats.Count; i++)
+                {
+                    _prevPerCoreCpuStats[i] = coreStats[i];
+                }
+
                 await Task.Delay(100);
-                var cur2 = ReadLinuxCpuStat();
-                long totalDiff2 = cur2.total - cur.total;
-                long idleDiff2 = cur2.idle - cur.idle;
-                _prevCpuStats = cur2;
+
+                var (overallStat2, coreStats2) = ReadLinuxCpuStats();
+                long totalDiff2 = overallStat2.total - overallStat.total;
+                long idleDiff2 = overallStat2.idle - overallStat.idle;
+                _prevCpuStats = overallStat2;
+
                 if (totalDiff2 > 0)
                 {
                     double usage = (1.0 - (double)idleDiff2 / totalDiff2) * 100.0;
-                    return Math.Round(Math.Clamp(usage, 0.0, 100.0), 1);
+                    data.CpuUsagePercent = Math.Round(Math.Clamp(usage, 0.0, 100.0), 1);
                 }
+                else
+                {
+                    data.CpuUsagePercent = 5.0;
+                }
+
+                var coreUsages2 = new List<double>();
+                for (int i = 0; i < coreStats2.Count; i++)
+                {
+                    var c2 = coreStats2[i];
+                    var prevC = i < coreStats.Count ? coreStats[i] : (0, 0);
+                    long cTotDiff = c2.total - prevC.total;
+                    long cIdleDiff = c2.idle - prevC.idle;
+                    _prevPerCoreCpuStats[i] = c2;
+
+                    if (cTotDiff > 0)
+                    {
+                        double cUsage = (1.0 - (double)cIdleDiff / cTotDiff) * 100.0;
+                        coreUsages2.Add(Math.Round(Math.Clamp(cUsage, 0.0, 100.0), 1));
+                    }
+                    else
+                    {
+                        coreUsages2.Add(data.CpuUsagePercent);
+                    }
+                }
+                data.CpuCoreUsages = coreUsages2;
+                return;
             }
             catch { }
         }
 
-        return 5.0; // Minimal default fallback
+        data.CpuUsagePercent = 5.0;
     }
 
-    private static (long idle, long total) ReadLinuxCpuStat()
+    private static ((long idle, long total) overall, List<(long idle, long total)> cores) ReadLinuxCpuStats()
     {
-        var firstLine = File.ReadLines("/proc/stat").FirstOrDefault();
-        if (string.IsNullOrEmpty(firstLine)) return (0, 0);
+        (long idle, long total) overall = (0, 0);
+        var cores = new List<(long idle, long total)>();
 
-        var parts = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in File.ReadLines("/proc/stat"))
+        {
+            if (line.StartsWith("cpu "))
+            {
+                overall = ParseCpuStatLine(line);
+            }
+            else if (line.StartsWith("cpu") && line.Length > 3 && char.IsDigit(line[3]))
+            {
+                cores.Add(ParseCpuStatLine(line));
+            }
+            else if (!line.StartsWith("cpu"))
+            {
+                break;
+            }
+        }
+
+        return (overall, cores);
+    }
+
+    private static (long idle, long total) ParseCpuStatLine(string line)
+    {
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 5) return (0, 0);
 
         long user = long.Parse(parts[1]);

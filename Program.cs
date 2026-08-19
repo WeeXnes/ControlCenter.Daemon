@@ -176,6 +176,9 @@ Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(apiKey) ? "Yes 
 Console.WriteLine($"  Certificate Pin:   {(!string.IsNullOrEmpty(certPin) ? certPin : "Auto-Pin (TOFU)")}");
 Console.WriteLine("==================================================");
 
+// Ensure SSH public key authentication & drop-in configs are active
+SshConfigHelper.EnsureSshdConfig();
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (s, e) =>
 {
@@ -351,84 +354,10 @@ static async Task ReceiveCommandsLoopAsync(ClientWebSocket ws, CancellationToken
     }
 }
 
-static void EnsureSshdConfig()
-{
-    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return;
-
-    try
-    {
-        bool needsReload = false;
-        string sshdDropInDir = "/etc/ssh/sshd_config.d";
-
-        if (Directory.Exists(sshdDropInDir))
-        {
-            string dropInFile = Path.Combine(sshdDropInDir, "99-controlcenter.conf");
-            string requiredConfig = "PubkeyAuthentication yes\nAuthorizedKeysFile .ssh/authorized_keys\n";
-            if (!File.Exists(dropInFile) || File.ReadAllText(dropInFile).Trim() != requiredConfig.Trim())
-            {
-                File.WriteAllText(dropInFile, requiredConfig);
-                try { File.SetUnixFileMode(dropInFile, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [+] Enabled PubkeyAuthentication in {dropInFile}");
-                Console.ResetColor();
-                needsReload = true;
-            }
-        }
-        else if (File.Exists("/etc/ssh/sshd_config"))
-        {
-            string content = File.ReadAllText("/etc/ssh/sshd_config");
-            if (content.Contains("PubkeyAuthentication no"))
-            {
-                content = content.Replace("PubkeyAuthentication no", "PubkeyAuthentication yes");
-                File.WriteAllText("/etc/ssh/sshd_config", content);
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [+] Updated /etc/ssh/sshd_config with PubkeyAuthentication yes");
-                Console.ResetColor();
-                needsReload = true;
-            }
-        }
-
-        try
-        {
-            if (needsReload)
-            {
-                RunSystemCommand("sh", "-c \"systemctl reload sshd || systemctl reload ssh || systemctl restart sshd || systemctl restart ssh\"");
-            }
-            else
-            {
-                RunSystemCommand("sh", "-c \"systemctl is-active --quiet sshd || systemctl is-active --quiet ssh || systemctl enable --now sshd || systemctl enable --now ssh\"");
-            }
-        }
-        catch { }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss}] [i] Note on SSH config check: {ex.Message}");
-    }
-}
-
-static void RunSystemCommand(string fileName, string args)
-{
-    try
-    {
-        using var proc = Process.Start(new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        });
-        proc?.WaitForExit(3000);
-    }
-    catch { }
-}
-
 static void ProvisionSshPublicKey(ClientWebSocket ws, string publicKey, CancellationToken ct)
 {
     bool success = false;
-    EnsureSshdConfig();
+    SshConfigHelper.EnsureSshdConfig();
 
     string targetUser = SystemCollector.GetActiveUsername();
     string cleanKey = publicKey.Trim();
@@ -497,7 +426,7 @@ static void ProvisionSshPublicKey(ClientWebSocket ws, string publicKey, Cancella
             // Fix file ownership if running as root for a non-root user directory
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && Environment.UserName == "root" && user != "root")
             {
-                RunSystemCommand("chown", $"-R {user}:{user} \"{sshDir}\"");
+                SshConfigHelper.RunCommand("chown", $"-R {user}:{user} \"{sshDir}\"");
             }
         }
 

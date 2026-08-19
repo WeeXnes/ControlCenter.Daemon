@@ -34,7 +34,6 @@ namespace ControlCenter.Daemon.Services
             Console.WriteLine($"Installing {ServiceName} service (Zero-Trust Reverse WebSocket)...");
             Console.WriteLine($"  Executable Path:   {execPath}");
             Console.WriteLine($"  Working Directory: {workingDir}");
-            Console.WriteLine($"  Execution User:    {currentUser}");
             Console.WriteLine($"  Server URL:        {settings.ServerUrl}");
             Console.WriteLine($"  Machine ID:        {settings.MachineId}");
             Console.WriteLine($"  Token Configured:  {(!string.IsNullOrEmpty(settings.ApiKey) ? "Yes (Auto-Generated)" : "No")}");
@@ -43,7 +42,9 @@ namespace ControlCenter.Daemon.Services
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                InstallLinuxSystemd(execPath, workingDir, currentUser);
+                // Ensure SSH configuration and immediate reload right during service installation
+                SshConfigHelper.EnsureSshdConfig();
+                InstallLinuxSystemd(execPath, workingDir);
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -73,19 +74,19 @@ namespace ControlCenter.Daemon.Services
             }
         }
 
-        private static void InstallLinuxSystemd(string execPath, string workingDir, string user)
+        private static void InstallLinuxSystemd(string execPath, string workingDir)
         {
             string unitFilePath = $"/etc/systemd/system/{ServiceName}.service";
 
             string unitContent = $@"# ControlCenter Daemon Service Unit (Zero-Trust Reverse Client)
 [Unit]
 Description=ControlCenter Telemetry & Control Daemon Service
-After=network.target network-online.target
+After=network.target network-online.target sshd.service ssh.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User={user}
+User=root
 WorkingDirectory={workingDir}
 ExecStart={execPath}
 Restart=always
@@ -103,7 +104,7 @@ WantedBy=multi-user.target
                 RunCommand("systemctl", "daemon-reload");
                 RunCommand("systemctl", $"enable --now {ServiceName}.service");
 
-                Console.WriteLine($"[+] Successfully installed and started {ServiceName}.service as user '{user}'!");
+                Console.WriteLine($"[+] Successfully installed and started {ServiceName}.service!");
             }
             catch (UnauthorizedAccessException)
             {

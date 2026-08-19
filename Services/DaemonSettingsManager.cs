@@ -26,54 +26,132 @@ namespace ControlCenter.Daemon.Services
     {
         public static string GetSettingsPath()
         {
+            // 1. If global /etc/controlcenter/daemon_settings.json exists, prefer it
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/etc/controlcenter/daemon_settings.json"))
+            {
+                return "/etc/controlcenter/daemon_settings.json";
+            }
+
+            // 2. If running under sudo, check SUDO_USER's home directory
+            string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+            if (!string.IsNullOrEmpty(sudoUser) && sudoUser != "root" && Directory.Exists($"/home/{sudoUser}"))
+            {
+                string sudoPath = Path.Combine($"/home/{sudoUser}", ".ControlCenterDaemon", "settings.json");
+                if (File.Exists(sudoPath))
+                {
+                    return sudoPath;
+                }
+            }
+
+            // 3. User profile directory
             string userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (string.IsNullOrEmpty(userDir))
             {
                 userDir = "/root";
             }
-            return Path.Combine(userDir, ".ControlCenterDaemon", "settings.json");
+
+            string userPath = Path.Combine(userDir, ".ControlCenterDaemon", "settings.json");
+            if (File.Exists(userPath))
+            {
+                return userPath;
+            }
+
+            // 4. Default target path
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && Environment.UserName == "root")
+            {
+                return "/etc/controlcenter/daemon_settings.json";
+            }
+
+            return userPath;
         }
 
         public static DaemonSettings Load()
         {
-            string path = GetSettingsPath();
-            if (File.Exists(path))
+            // Check candidate paths in priority order
+            var candidatePaths = new List<string>();
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                try
+                candidatePaths.Add("/etc/controlcenter/daemon_settings.json");
+                string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+                if (!string.IsNullOrEmpty(sudoUser) && sudoUser != "root")
                 {
-                    string json = File.ReadAllText(path);
-                    var loaded = JsonSerializer.Deserialize<DaemonSettings>(json);
-                    if (loaded != null) return loaded;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Warning: Failed to read settings.json at {path}: {ex.Message}");
+                    candidatePaths.Add(Path.Combine($"/home/{sudoUser}", ".ControlCenterDaemon", "settings.json"));
                 }
             }
+
+            string userDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(userDir))
+            {
+                candidatePaths.Add(Path.Combine(userDir, ".ControlCenterDaemon", "settings.json"));
+            }
+            candidatePaths.Add("/root/.ControlCenterDaemon/settings.json");
+
+            foreach (var path in candidatePaths)
+            {
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        string json = File.ReadAllText(path);
+                        var loaded = JsonSerializer.Deserialize<DaemonSettings>(json);
+                        if (loaded != null && !string.IsNullOrWhiteSpace(loaded.ServerUrl))
+                        {
+                            return loaded;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
             return new DaemonSettings();
         }
 
         public static void Save(DaemonSettings settings)
         {
-            string path = GetSettingsPath();
-            string dir = Path.GetDirectoryName(path)!;
+            var targetPaths = new List<string> { GetSettingsPath() };
 
-            if (!Directory.Exists(dir))
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && Environment.UserName == "root")
             {
-                Directory.CreateDirectory(dir);
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                if (!targetPaths.Contains("/etc/controlcenter/daemon_settings.json"))
                 {
-                    try { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); } catch { }
+                    targetPaths.Add("/etc/controlcenter/daemon_settings.json");
+                }
+                string? sudoUser = Environment.GetEnvironmentVariable("SUDO_USER");
+                if (!string.IsNullOrEmpty(sudoUser) && sudoUser != "root" && Directory.Exists($"/home/{sudoUser}"))
+                {
+                    targetPaths.Add(Path.Combine($"/home/{sudoUser}", ".ControlCenterDaemon", "settings.json"));
                 }
             }
 
             var options = new JsonSerializerOptions { WriteIndented = true };
             string json = JsonSerializer.Serialize(settings, options);
-            File.WriteAllText(path, json);
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            foreach (var path in targetPaths)
             {
-                try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); } catch { }
+                try
+                {
+                    string dir = Path.GetDirectoryName(path)!;
+                    if (!Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                        {
+                            try { File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute); } catch { }
+                        }
+                    }
+
+                    File.WriteAllText(path, json);
+
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    {
+                        try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Settings] Note saving settings to {path}: {ex.Message}");
+                }
             }
         }
 
