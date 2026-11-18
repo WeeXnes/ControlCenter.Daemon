@@ -1,6 +1,8 @@
-version: 43
+version: 59
 jobs:
 - name: Build & Publish Standalone Daemon
+  executeInSandbox: false
+  jobExecutor: Builder
   steps:
   - type: CheckoutStep
     name: checkout code
@@ -14,7 +16,8 @@ jobs:
     name: Dotnet Publish (Linux x64 Standalone)
     runInContainer: false
     interpreter:
-      type: DefaultInterpreter
+      type: PosixInterpreter
+      shell: sh
       commands: |
         echo "Publishing ControlCenter.Daemon as standalone self-contained binary for Linux x64..."
         mkdir -p ./release
@@ -26,6 +29,7 @@ jobs:
                     -p:EnableCompressionInSingleFile=true \
                     -o ./output_linux
         (cd ./output_linux && tar -czvf ../release/ControlCenter.Daemon_Linux_x64.tar.gz .)
+    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
@@ -33,7 +37,8 @@ jobs:
     name: Dotnet Publish (Windows x64 Standalone)
     runInContainer: false
     interpreter:
-      type: DefaultInterpreter
+      type: PosixInterpreter
+      shell: sh
       commands: |
         echo "Publishing ControlCenter.Daemon as standalone self-contained binary for Windows x64..."
         dotnet publish ControlCenter.Daemon.csproj \
@@ -45,6 +50,7 @@ jobs:
                     -o ./output_win
         (cd ./output_win && zip -r ../release/ControlCenter.Daemon_Windows_x64.zip .)
         rm -rf ./output_linux ./output_win
+    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
@@ -58,11 +64,13 @@ jobs:
     name: get version
     runInContainer: false
     interpreter:
-      type: DefaultInterpreter
+      type: PosixInterpreter
+      shell: sh
       commands: |
         echo "Extracting version from ControlCenter.Daemon.csproj..."
         grep -oP '<Version>\K[^<]+' ControlCenter.Daemon.csproj > version.txt || echo "1.0.0" > version.txt
         echo "Version extracted: $(cat version.txt)"
+    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
@@ -70,7 +78,8 @@ jobs:
     name: check if tag exists
     runInContainer: false
     interpreter:
-      type: DefaultInterpreter
+      type: PosixInterpreter
+      shell: sh
       commands: |
         version=$(cat version.txt)
         echo "Checking if tag '$version' exists on origin..."
@@ -82,6 +91,7 @@ jobs:
             echo "Tag '$version' does not exist. Proceeding to create tag."
             exit 0
         fi
+    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
@@ -93,20 +103,22 @@ jobs:
   - type: CreateTagStep
     name: create tag
     tagName: '@file:version.txt@'
-    tagMessage: 'Release @file:version.txt@'
+    tagMessage: Release @file:version.txt@
     condition: SUCCESSFUL
     optional: false
-  jobExecutor: Builder
   triggers:
   - type: BranchUpdateTrigger
     userMatch: anyone
   - type: PullRequestUpdateTrigger
   retryCondition: never
-  maxRetries: 3
+  maxAttempts: 4
   retryDelay: 30
+  includeUpstreamWhenRebuild: false
+  includeDownstreamWhenRebuild: false
   timeout: 14400
-
 - name: Release Stable AUR
+  executeInSandbox: false
+  jobExecutor: Builder
   steps:
   - type: CheckoutStep
     name: checkout code
@@ -125,7 +137,8 @@ jobs:
     name: Update Stable AUR Package
     runInContainer: false
     interpreter:
-      type: DefaultInterpreter
+      type: PosixInterpreter
+      shell: sh
       commands: |
         repo_url="ssh://aur@@aur.archlinux.org/controlcenter-daemon.git"
         repo_dir="controlcenter-daemon"
@@ -143,15 +156,17 @@ jobs:
           git commit -m "Automatically updated version to ${version}"
           git push
         )
+    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
-  jobExecutor: Builder
   triggers:
   - type: TagCreateTrigger
     branches: master
     projects: ControlCenter/ControlCenter.Daemon
   retryCondition: never
-  maxRetries: 3
+  maxAttempts: 4
   retryDelay: 30
+  includeUpstreamWhenRebuild: false
+  includeDownstreamWhenRebuild: false
   timeout: 14400
