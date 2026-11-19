@@ -1,69 +1,51 @@
-# ControlCenter Daemon
+# ControlCenter.Daemon
 
-<div align="center">
-  <h3>Zero-Trust Node Telemetry & Orchestration Agent for ControlCenter</h3>
-  <p>Lightweight .NET background agent streaming system metrics over encrypted outbound WebSockets.</p>
-  <p>
-    <a href="https://code.weexnes.dev/ControlCenter/ControlCenter.Daemon"><strong>Repository</strong></a> •
-    <a href="https://code.weexnes.dev/ControlCenter"><strong>ControlCenter Web Dashboard</strong></a>
-  </p>
-</div>
+Zero-trust node telemetry and orchestration agent for [ControlCenter](https://code.weexnes.dev/ControlCenter): a lightweight .NET background agent that streams system metrics over encrypted outbound WebSockets.
 
----
+[![License](https://img.shields.io/badge/license-GPL--3.0-000000?style=flat-square&labelColor=1f1f1f)](#license)
+[![Platform](https://img.shields.io/badge/platform-Linux-000000?style=flat-square&labelColor=1f1f1f)](#install)
+[![Stack](https://img.shields.io/badge/stack-.NET-000000?style=flat-square&labelColor=1f1f1f)](#build-from-source)
 
-## 🌟 Overview
+[Repository](https://code.weexnes.dev/ControlCenter/ControlCenter.Daemon) · [ControlCenter web dashboard](https://code.weexnes.dev/ControlCenter)
 
-`ControlCenter.Daemon` is the native client agent running on managed machines. It gathers real-time hardware telemetry and establishes a persistent, zero-trust outbound WebSocket (`wss://`) connection to the central ControlCenter Web server.
+`ControlCenter.Daemon` is the native client agent running on managed machines. It gathers real-time hardware telemetry
+and keeps a persistent, zero-trust outbound WebSocket (`wss://`) connection to the central ControlCenter web server.
 
-Because all connections originate from the node toward the ControlCenter server:
-- **Zero Inbound Ports Required:** Nodes behind NAT, firewalls, home routers, or mesh VPNs (Netmaker / Tailscale / WireGuard) connect seamlessly without port forwarding.
-- **Certificate Fingerprint Pinning:** Supports SHA-256 SSL fingerprint pinning for protection against MITM attacks when communicating over self-signed certificates.
-- **Zero-Touch Auto-Enrollment:** Automatically registers new nodes into the ControlCenter approval queue.
+## Features
 
----
+Because all connections start from the node toward the ControlCenter server:
 
-## 📊 Telemetry Metrics Collected
+- **Zero inbound ports required:** nodes behind NAT, firewalls, home routers, or mesh VPNs (Netmaker / Tailscale / WireGuard) connect without port forwarding.
+- **Certificate fingerprint pinning:** supports SHA-256 SSL fingerprint pinning against MITM attacks when talking to self-signed certificates.
+- **Zero-touch auto-enrollment:** registers new nodes in the ControlCenter approval queue automatically.
 
-- **CPU:** Total utilization percentage, core count, frequency, model name.
-- **RAM:** Used memory, total memory, usage percentage, swap memory.
-- **Disks & Storage:** Mounted filesystems, filesystem types, used/free/total gigabytes, drive names.
-- **Network:** Active network interfaces, interface types, local and VPN IPv4/IPv6 addresses, real-time RX/TX transfer bandwidth.
-- **System Information:** Hostname, OS platform, kernel version, machine UUID, system uptime in seconds.
-- **Processes:** Top CPU and memory-consuming system processes.
+### Telemetry collected
 
----
+- **CPU:** total utilization percentage, core count, frequency, model name.
+- **RAM:** used memory, total memory, usage percentage, swap memory.
+- **Disks and storage:** mounted filesystems, filesystem types, used/free/total gigabytes, drive names.
+- **Network:** active network interfaces, interface types, local and VPN IPv4/IPv6 addresses, real-time RX/TX transfer bandwidth.
+- **System information:** hostname, OS platform, kernel version, machine UUID, system uptime in seconds.
+- **Processes:** top CPU- and memory-consuming system processes.
 
-## 🚀 Installation
+## Install
 
-### Option 1: One-Line Auto Installer (Linux / Systemd)
+### One-line installer (Linux / systemd)
 
 ```bash
 curl -sSL https://code.weexnes.dev/ControlCenter/ControlCenter.Daemon/~raw/master/install.sh | sudo bash
 ```
 
-### Option 2: Arch Linux / AUR Package
+### Arch Linux / AUR
 
 ```bash
 yay -S controlcenter-daemon
 ```
 
-### Option 3: Manual Compilation (.NET SDK)
+## Usage
 
 ```bash
-# Build standalone binary
-dotnet publish -c Release -r linux-x64 --self-contained false -o ./publish
-
-# Install binary to /usr/local/bin
-sudo cp ./publish/ControlCenter.Daemon /usr/local/bin/controlcenter-daemon
-sudo chmod +x /usr/local/bin/controlcenter-daemon
-```
-
----
-
-## 🛠️ Usage & CLI Commands
-
-```bash
-# Connect daemon to ControlCenter server
+# Connect the daemon to a ControlCenter server
 controlcenter-daemon --address 100.64.0.4:4382
 
 # Connect with a specific pre-shared authentication token
@@ -81,9 +63,7 @@ controlcenter-daemon setFingerprint "your_sha256_fingerprint"
 controlcenter-daemon status
 ```
 
----
-
-## ⚙️ Systemd Service Configuration
+### systemd service
 
 When installed as a service (`controlcenter-daemon.service`):
 
@@ -105,14 +85,26 @@ WantedBy=multi-user.target
 ```
 
 Manage the service:
+
 ```bash
 sudo systemctl enable --now controlcenter-daemon
 sudo systemctl status controlcenter-daemon
 journalctl -u controlcenter-daemon -f
 ```
 
----
+## Build from source
 
-## 📄 License
+Prerequisites: .NET SDK.
+
+```bash
+# Build the standalone binary
+dotnet publish -c Release -r linux-x64 --self-contained false -o ./publish
+
+# Install the binary to /usr/local/bin
+sudo cp ./publish/ControlCenter.Daemon /usr/local/bin/controlcenter-daemon
+sudo chmod +x /usr/local/bin/controlcenter-daemon
+```
+
+## License
 
 GPL-3.0 License.
